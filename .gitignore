@@ -1,0 +1,14 @@
+node_modules/
+dist/
+.env
+*.log
+
+# Android build artifacts
+android/app/build/
+android/build/
+android/.gradle/
+android/capacitor-cordova-android-plugins/build/
+android/capacitor-cordova-android-plugins/.cxx/
+android/.idea/
+*.iml
+local.properties

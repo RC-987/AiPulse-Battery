@@ -1,0 +1,5 @@
+{
+	"appId": "com.aipulse.battery",
+	"appName": "Battery Monitor",
+	"webDir": "dist"
+}

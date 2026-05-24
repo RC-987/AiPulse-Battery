@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">AiPulse</string>
+    <string name="title_activity_main">AiPulse</string>
+    <string name="package_name">com.aipulse.app</string>
+    <string name="custom_url_scheme">com.aipulse.app</string>
+</resources>
