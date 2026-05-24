@@ -31,6 +31,26 @@ class BatteryMonitorPlugin : Plugin() {
     // Rolling buffer for drain rate smoothing
     private val currentMaHistory = mutableListOf<Int>()
 
+    private fun readCycleCount(bm: BatteryManager): Int {
+        if (Build.VERSION.SDK_INT >= 34) {
+            try {
+                val count = bm.getIntProperty(6) // BATTERY_PROPERTY_CYCLE_COUNT
+                if (count > 0) return count
+            } catch (_: Exception) {}
+        }
+        val sysPaths = listOf(
+            "/sys/class/power_supply/battery/cycle_count",
+            "/sys/class/power_supply/bms/cycle_count"
+        )
+        for (path in sysPaths) {
+            try {
+                val value = java.io.File(path).readText().trim().toIntOrNull()
+                if (value != null && value > 0) return value
+            } catch (_: Exception) { }
+        }
+        return getSystemProp("persist.sys.BatteryCycleCount").toIntOrNull() ?: 0
+    }
+
     // Attempt to read battery design capacity from kernel or props.
     // Returns 0 if unknown (so UI can hide health % rather than show wrong value).
     private fun readDesignCapacityMah(): Int {
@@ -38,6 +58,7 @@ class BatteryMonitorPlugin : Plugin() {
         val sysPaths = listOf(
             "/sys/class/power_supply/battery/charge_full_design",
             "/sys/class/power_supply/Battery/charge_full_design",
+            "/sys/class/power_supply/bms/charge_full_design"
         )
         for (path in sysPaths) {
             try {
@@ -47,10 +68,26 @@ class BatteryMonitorPlugin : Plugin() {
                 }
             } catch (_: Exception) { }
         }
-        // Nothing Phone 3: known from BIS certification (Indian 5500mAh)
+        
+        val energyPaths = listOf(
+            "/sys/class/power_supply/battery/energy_full_design",
+            "/sys/class/power_supply/bms/energy_full_design"
+        )
+        for (path in energyPaths) {
+            try {
+                val value = java.io.File(path).readText().trim().toLongOrNull()
+                // Convert uWh to mAh assuming nominal voltage of 3.85V (3850000 uV)
+                if (value != null && value > 0) {
+                    return (value / 3850).toInt()
+                }
+            } catch (_: Exception) { }
+        }
+
+        // Known device hardcodes
         val model = android.os.Build.MODEL
         val product = android.os.Build.PRODUCT
         if (model == "A024" || product.startsWith("Metroid")) return 5500
+        
         // Unknown — return 0 so caller can decide whether to show health
         return 0
     }
@@ -243,13 +280,13 @@ class BatteryMonitorPlugin : Plugin() {
         }
 
         // Battery health metrics
-        val cycleCount = getSystemProp("persist.sys.BatteryCycleCount").toIntOrNull() ?: 0
+        val cycleCount = readCycleCount(bm)
         val vendorHealth = getSystemProp("vendor.nt.battery_info.health").toIntOrNull() ?: -1
         val currentMa = currentUa / 1000
         val chargeMah = chargeUah / 1000
 
         // Design capacity: dynamic read, 0 = unknown
-        val designCapacityMah = readDesignCapacityMah()
+        val designCapacityMahRaw = readDesignCapacityMah()
 
         // Calculate actual capacity from charge counter and level
         //   actualCapacity = chargeCounter / (level/100)
@@ -271,7 +308,14 @@ class BatteryMonitorPlugin : Plugin() {
             estimate
         } else {
             val cached = getPrefs().getInt("last_actual_capacity_mah", 0)
-            if (cached > 0) cached else designCapacityMah
+            if (cached > 0) cached else designCapacityMahRaw
+        }
+
+        val designCapacityMah = if (designCapacityMahRaw == 0 && actualCapacityMah > 0) {
+            val commonSizes = listOf(3000, 3300, 3500, 4000, 4300, 4500, 4800, 5000, 5160, 5500, 6000)
+            commonSizes.find { it >= actualCapacityMah } ?: (((actualCapacityMah + 499) / 500) * 500)
+        } else {
+            designCapacityMahRaw
         }
 
         val healthPct = if (actualCapacityMah > 0 && designCapacityMah > 0) {
