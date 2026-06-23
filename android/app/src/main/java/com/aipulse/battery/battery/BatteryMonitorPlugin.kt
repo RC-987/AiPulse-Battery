@@ -351,10 +351,51 @@ class BatteryMonitorPlugin : Plugin() {
         }
 
         // Max charging power (μA and μV from battery intent)
-        val maxChargingCurrentUa = batteryIntent?.getIntExtra("max_charging_current", 0) ?: 0
-        val maxChargingVoltageUv = batteryIntent?.getIntExtra("max_charging_voltage", 0) ?: 0
+        var maxChargingCurrentUa = batteryIntent?.getIntExtra("max_charging_current", 0) ?: 0
+        var maxChargingVoltageUv = batteryIntent?.getIntExtra("max_charging_voltage", 0) ?: 0
+
+        // Fallback: many OEMs (Vivo, Oppo, Realme, etc.) don't populate the
+        // max_charging_current / max_charging_voltage intent extras. Try reading
+        // from sysfs USB or main charger power supply nodes instead.
+        if (isCharging && (maxChargingCurrentUa <= 0 || maxChargingVoltageUv <= 0)) {
+            val usbCurrentPaths = listOf(
+                "/sys/class/power_supply/usb/input_current_limit",
+                "/sys/class/power_supply/usb/current_max",
+                "/sys/class/power_supply/main/input_current_limit",
+                "/sys/class/power_supply/main/current_max"
+            )
+            val usbVoltagePaths = listOf(
+                "/sys/class/power_supply/usb/voltage_max",
+                "/sys/class/power_supply/main/voltage_max"
+            )
+            if (maxChargingCurrentUa <= 0) {
+                for (path in usbCurrentPaths) {
+                    try {
+                        val v = java.io.File(path).readText().trim().toLongOrNull()
+                        if (v != null && v > 0) { maxChargingCurrentUa = v.toInt(); break }
+                    } catch (_: Exception) { }
+                }
+            }
+            if (maxChargingVoltageUv <= 0) {
+                for (path in usbVoltagePaths) {
+                    try {
+                        val v = java.io.File(path).readText().trim().toLongOrNull()
+                        if (v != null && v > 0) { maxChargingVoltageUv = v.toInt(); break }
+                    } catch (_: Exception) { }
+                }
+            }
+        }
+
+        // Compute wattage from negotiated/sysfs values, or fall back to live V×I.
+        // The live fallback uses the actual battery voltage and instantaneous
+        // current. This underestimates slightly (battery V < charger V due to
+        // voltage drop across charging circuitry), but it's far better than
+        // showing nothing.
         val chargingWatts = if (maxChargingCurrentUa > 0 && maxChargingVoltageUv > 0) {
             (maxChargingCurrentUa.toLong() * maxChargingVoltageUv.toLong()) / 1_000_000_000_000.0
+        } else if (isCharging && voltMv > 0 && currentUa != 0) {
+            // Live power: voltMv (mV) × |currentUa| (μA) → watts
+            (voltMv.toLong() * Math.abs(currentUa.toLong())) / 1_000_000_000.0
         } else 0.0
 
         // Smoothed drain rate: average last N current readings to avoid wild fluctuations

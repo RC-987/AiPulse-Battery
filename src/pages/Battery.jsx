@@ -506,7 +506,7 @@ export default function Battery() {
         <StatCard label="Temp" value={`${stats.temperature}°C`} />
         <StatCard label="In Battery" value={stats.chargeMah > 0 ? `${stats.chargeMah}mAh` : '—'} />
         {isCharging && stats.chargingWatts > 0 && (
-          <StatCard label="Max Power" value={`${stats.chargingWatts}W`} />
+          <StatCard label={stats.negotiatedVoltageV > 0 ? "Max Power" : "Power"} value={`${stats.chargingWatts}W`} />
         )}
         <StatCard label="Sessions" value={`${chargeSessions.length} Charge / ${dischargeSessions.length} Discharge`} />
       </div>}
